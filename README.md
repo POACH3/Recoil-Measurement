@@ -13,7 +13,10 @@ The goal of this project is twofold. First, to gain more experience with embedde
 ## Current Functionality
 Force is measured and outputted to a serial monitor. The force is measured with a load cell, amplified with an INA125P, and converted to discrete values with an MCP3208.
 
+Data is logged to a .csv file on an SD card.
+
 ## Future Functionality
 - muzzle flip angle measurement via IMU (MPU9150)
 - recoil distance measurement via IMU (MPU9150)
-- logging to an SD card
+- data buffer
+- smart logging (only write data when a shot is detected)
