@@ -16,7 +16,7 @@ Force is measured and outputted to a serial monitor. The force is measured with 
 Data is logged to a .csv file on an SD card.
 
 ## Future Functionality
-- muzzle flip angle measurement via IMU (MPU9150)
-- recoil distance measurement via IMU (MPU9150)
+- muzzle flip angle measurement via IMU (LSM6DS3)
+- recoil distance measurement via IMU (LSM6DS3)
 - data buffer
 - smart logging (only write data when a shot is detected)
