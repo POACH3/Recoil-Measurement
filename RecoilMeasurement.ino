@@ -140,8 +140,6 @@ void loop() {
   }
 
 
-
-
   // adcRaw = readADC(0);
   // adcCalibrated = adcRaw - adcOffset;
 
