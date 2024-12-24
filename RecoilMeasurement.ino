@@ -3,26 +3,12 @@ AUTHOR:   Trenton S
 PURPOSE:  Measure force
 NOTES:    
 
-
-          PINOUT
-
-  MPU9150
-	 SCL ---------- SCL (A5)  green/lblue
-	 SDA ---------- SDA (A4)  blue/dblue
-	 VDD ---------- 3.3V
-	 GND ---------- GND
-
-
 */
 
 #include <SdFat.h>
 #include <SPI.h>
 #include <MCP3208.h>
 #include <TimerOne.h>
-
-//#define CS_IMU 9    // D9 IMU sensor chip select
-
-const int CS_SD = 10; // SD card chip select
 
 // Arduino Nano
 // #define CLOCK_PIN 13     // D13 SPI clock pin
@@ -33,10 +19,11 @@ const int CS_SD = 10; // SD card chip select
 #define CLOCK_PIN 13  // D13 SPI clock
 #define MISO_PIN 12   // D12 SPI MOSI
 #define MOSI_PIN 11   // D11 SPI MISO
-#define CS_MCP3208 9  // D9 force sensor chip select
+#define CS_MCP3208 10 // D10 force sensor chip select
+//#define CS_IMU 9    // D9 IMU sensor chip select
 
 SdFat sd;
-FatFile dataFile;
+FsFile file;
 
 MCP3208 adc;
 uint16_t adcRaw;
@@ -55,23 +42,41 @@ unsigned long sampleInterval = 1000; // every 1000 microseconds
 int sampleRate = 1500; // 1500 samples/second
 int clockRate = sampleRate * 20; // 30000 Hz
 
+unsigned long startTime;
+
+
+
 void setup() {
   
   Serial.begin(9600);
+  delay(1000);
 
-  if (!sd.begin(CS_SD)) {
+  if (!sd.begin(SdioConfig())) {
     Serial.println("SD card initialization failed!");
     return;
   }
   Serial.println("SD card initialized.");
 
-  // open the file for writing (or create if it doesn't exist)
-  dataFile = sd.open("recoil_data.txt", O_WRITE | O_CREAT | O_TRUNC);
-  if (!dataFile) {
+  // delete the file if it already exists
+  if (sd.exists("recoil_data.csv")) {
+    if (!sd.remove("recoil_data.csv")) {
+      Serial.println("Error deleting the file.");
+      return;
+    }
+    Serial.println("File deleted.");
+  }
+
+  // create and open the file
+  file = sd.open("recoil_data.csv", O_RDWR | O_CREAT | O_AT_END);
+  if (!file) {
     Serial.println("Error opening file.");
     return;
   }
-  Serial.println("File opened successfully.");
+  Serial.println("File opened.");
+
+  file.println("TIMESTAMP,FORCE (kg),VOLTAGE (V)");
+  file.flush();
+
 
   pinMode(CS_MCP3208, OUTPUT);
   //pinMode(CS_IMU, OUTPUT);
@@ -84,8 +89,6 @@ void setup() {
   
 	adc.begin();
 	adc.analogReadResolution(12);
-
-  Serial.begin(9600);
 
   Serial.println("\nCalibrating...");
   delay(3000);
@@ -100,6 +103,8 @@ void setup() {
   Serial.print("OFFSET: ");
   Serial.println(adcOffset);
   delay(2000);
+
+  startTime = millis();
 }
 
 int readADC(int channel) {
@@ -131,12 +136,24 @@ void loop() {
     float voltage = ((adcRaw / 4095.0) * maxVoltage) - voltageBaseline;
     float kilograms = voltage * calibrationFactor;
 
-    if (dataFile) {
-      dataFile.write(kilograms);  // write data to file
-      dataFile.flush();           // write data immediately
+    if (file) {
+      unsigned long timestamp = millis();
+      float seconds = (timestamp - startTime) / 1000;
+
+      if (kilograms < 0) { kilograms = 0; }
+      
+      file.printf("%.3f,%.3f,%.3f\n", seconds, kilograms, voltage);
+      file.flush();           // write data immediately
+      //file.close();
+      //Serial.println("Wrote to file.");
+
+      Serial.println("Voltage:   " + String(voltage) + " V");
+      Serial.println("Force:     " + String(kilograms) + " kg\n\n");
+
     } else {
       Serial.println("Error writing to file.");
     }
+    
   }
 
 
