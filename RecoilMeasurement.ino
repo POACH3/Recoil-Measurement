@@ -1,7 +1,8 @@
 /*
 AUTHOR:   Trenton S
 PURPOSE:  Measure force
-NOTES:    
+NOTES: 
+    - create a new file for each session (datetime is in file name)   
 
 */
 
@@ -29,6 +30,7 @@ MCP3208 adc;
 uint16_t adcRaw;
 uint16_t adcCalibrated;
 uint16_t adcOffset;
+
 float systemVoltage = 5.0; // volts
 float loadCellMaxWeight = 50.0; // kg
 float maxVoltage = 3.02; // 50 * .001 * 604
@@ -44,10 +46,26 @@ int clockRate = sampleRate * 20; // 30000 Hz
 
 unsigned long startTime;
 
+const int buttonPin = 2;
+const int ledPin = 3;
+
+int currentButtonState = HIGH;        // Current button state
+int lastButtonState = HIGH;    // Previous button state
+unsigned long lastDebounceTime = 0; // Time of the last debounce
+unsigned long debounceDelay = 50;  // Debounce delay (ms)
+bool ledState = false;         // Current LED state (on/off)
+
+bool loggingEnabled = false;
+
 
 
 void setup() {
   
+  pinMode(buttonPin, INPUT_PULLUP); // Button with pull-up resistor
+  pinMode(ledPin, OUTPUT);          // Set the LED pin as output
+  digitalWrite(ledPin, LOW);        // Turn off LED initially
+
+
   Serial.begin(9600);
   delay(1000);
 
@@ -124,8 +142,37 @@ int readADC(int channel) {
 // }
 
 void loop() {
-  unsigned long currentTime = micros();
 
+  int buttonState = digitalRead(buttonPin);
+
+  if (buttonState != lastButtonState) { lastDebounceTime = millis(); } // reset debounce timer
+
+  if ((millis() - lastDebounceTime) > debounceDelay) {
+    // if button state has stabilized
+    if (buttonState != currentButtonState) {
+      currentButtonState = buttonState;
+
+      // toggle logging state on button press
+      if (currentButtonState == HIGH) {
+        if (loggingEnabled) {
+          loggingEnabled = false;
+          digitalWrite(ledPin, LOW);
+        } else {
+          loggingEnabled = true;
+          digitalWrite(ledPin, HIGH);
+        }
+      }
+
+      //loggingEnabled = !loggingEnabled;
+      //digitalWrite(ledPin, loggingEnabled ? HIGH : LOW); // Update LED
+
+    }
+  }
+
+  lastButtonState = buttonState; // save last button state
+
+
+  unsigned long currentTime = micros();
   if (currentTime - lastSampleTime >= sampleInterval) {
     lastSampleTime = currentTime;
 
@@ -136,7 +183,9 @@ void loop() {
     float voltage = ((adcRaw / 4095.0) * maxVoltage) - voltageBaseline;
     float kilograms = voltage * calibrationFactor;
 
-    if (file) {
+    if (loggingEnabled) {
+      
+      if (file) {
       unsigned long timestamp = millis();
       float seconds = (timestamp - startTime) / 1000;
 
@@ -149,13 +198,11 @@ void loop() {
 
       Serial.println("Voltage:   " + String(voltage) + " V");
       Serial.println("Force:     " + String(kilograms) + " kg\n\n");
-
-    } else {
-      Serial.println("Error writing to file.");
+      } else {
+        Serial.println("Error writing to file.");
+      }
     }
-    
   }
-
 
   // adcRaw = readADC(0);
   // adcCalibrated = adcRaw - adcOffset;
