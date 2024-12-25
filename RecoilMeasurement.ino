@@ -53,11 +53,12 @@ int currentButtonState = HIGH;        // Current button state
 int lastButtonState = HIGH;    // Previous button state
 unsigned long lastDebounceTime = 0; // Time of the last debounce
 unsigned long debounceDelay = 50;  // Debounce delay (ms)
-bool ledState = false;         // Current LED state (on/off)
+//bool ledState = false;         // Current LED state (on/off)
 
 bool loggingEnabled = false;
 
-
+unsigned long timestamp;
+float seconds;
 
 void setup() {
   
@@ -141,8 +142,8 @@ int readADC(int channel) {
 
 // }
 
-void loop() {
-
+void handleButtonPress() {
+  
   int buttonState = digitalRead(buttonPin);
 
   if (buttonState != lastButtonState) { lastDebounceTime = millis(); } // reset debounce timer
@@ -170,7 +171,11 @@ void loop() {
   }
 
   lastButtonState = buttonState; // save last button state
+}
 
+void loop() {
+
+  handleButtonPress();
 
   unsigned long currentTime = micros();
   if (currentTime - lastSampleTime >= sampleInterval) {
@@ -183,25 +188,31 @@ void loop() {
     float voltage = ((adcRaw / 4095.0) * maxVoltage) - voltageBaseline;
     float kilograms = voltage * calibrationFactor;
 
+    if (kilograms < 0) { kilograms = 0; }
+
+    timestamp = millis();
+    seconds = (timestamp - startTime) / 1000;
+
+    Serial.println("Timestamp: " + String(seconds) + " s");
+    Serial.println("Voltage:   " + String(voltage) + " V");
+    Serial.println("Force:     " + String(kilograms) + " kg\n\n");
+
     if (loggingEnabled) {
       
       if (file) {
-      unsigned long timestamp = millis();
-      float seconds = (timestamp - startTime) / 1000;
-
-      if (kilograms < 0) { kilograms = 0; }
       
       file.printf("%.3f,%.3f,%.3f\n", seconds, kilograms, voltage);
       file.flush();           // write data immediately
       //file.close();
-      //Serial.println("Wrote to file.");
+      Serial.println("Wrote to file.");
 
-      Serial.println("Voltage:   " + String(voltage) + " V");
-      Serial.println("Force:     " + String(kilograms) + " kg\n\n");
+      // Serial.println("Voltage:   " + String(voltage) + " V");
+      // Serial.println("Force:     " + String(kilograms) + " kg\n\n");
       } else {
         Serial.println("Error writing to file.");
       }
     }
+
   }
 
   // adcRaw = readADC(0);
