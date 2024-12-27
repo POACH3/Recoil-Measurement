@@ -2,29 +2,41 @@
 AUTHOR:   Trenton S
 PURPOSE:  Measure force
 NOTES: 
-    - create a new file for each session (datetime is in file name)   
+    - create a new file for each session (datetime is in file name)
+    - integrate IMU values to get displacement distance and angle
+    - add read instruments and process measurements methods
 
 */
 
 #include <SdFat.h>
 #include <SPI.h>
+#include "SparkFunLSM6DS3.h"
 #include <MCP3208.h>
 #include <TimerOne.h>
-
-// Arduino Nano
-// #define CLOCK_PIN 13     // D13 SPI clock pin
-// #define MISO_PIN 12      // D12 SPI MOSI pin
-// #define MOSI_PIN 11      // D11 SPI MISO pin
 
 // Teensy 4.1
 #define CLOCK_PIN 13  // D13 SPI clock
 #define MISO_PIN 12   // D12 SPI MOSI
 #define MOSI_PIN 11   // D11 SPI MISO
 #define CS_MCP3208 10 // D10 force sensor chip select
-//#define CS_IMU 9    // D9 IMU sensor chip select
+#define CS_IMU 9      // D9 IMU sensor chip select
 
 SdFat sd;
 FsFile file;
+
+LSM6DS3 imu( SPI_MODE, CS_IMU);
+float accelX;
+float accelY;
+float accelZ;
+float gyroX;
+float gyroY;
+float gyroZ;
+float tempF;
+
+float velX;
+float dispX;
+float angle;
+
 
 MCP3208 adc;
 uint16_t adcRaw;
@@ -62,9 +74,9 @@ float seconds;
 
 void setup() {
   
-  pinMode(buttonPin, INPUT_PULLUP); // Button with pull-up resistor
-  pinMode(ledPin, OUTPUT);          // Set the LED pin as output
-  digitalWrite(ledPin, LOW);        // Turn off LED initially
+  pinMode(buttonPin, INPUT_PULLUP);
+  pinMode(ledPin, OUTPUT);
+  digitalWrite(ledPin, LOW);
 
 
   Serial.begin(9600);
@@ -93,8 +105,14 @@ void setup() {
   }
   Serial.println("File opened.");
 
-  file.println("TIMESTAMP,FORCE (kg),VOLTAGE (V)");
+  file.println("TIMESTAMP,FORCE (kg),VOLTAGE (V),X ACCELERATION (g),X VELOCITY (m/s),X DISPLACEMENT (m), MUZZLE ANGULAR MOMENTUM (deg/s), MUZZLE RISE (deg)");
   file.flush();
+
+
+
+  if (imu.begin() != 0) { Serial.println("Problem starting the IMU."); }
+  else { Serial.println("IMU started."); }
+
 
 
   pinMode(CS_MCP3208, OUTPUT);
@@ -127,20 +145,28 @@ void setup() {
 }
 
 int readADC(int channel) {
-    byte command = 0b00000110 | (channel << 2); // start bit + single-ended bit + channel
-    digitalWrite(CS_MCP3208, LOW);              // enable chip select
-    SPI.transfer(command);                      // send command
-    int result = SPI.transfer(0) & 0x0F;        // read the high 4 bits
-    result <<= 8;                               // shift high bits
-    result |= SPI.transfer(0);                  // read the low 8 bits
-    digitalWrite(CS_MCP3208, HIGH);             // disable chip select
+  byte command = 0b00000110 | (channel << 2); // start bit + single-ended bit + channel
+  digitalWrite(CS_MCP3208, LOW);              // enable chip select
+  SPI.transfer(command);                      // send command
+  int result = SPI.transfer(0) & 0x0F;        // read the high 4 bits
+  result <<= 8;                               // shift high bits
+  result |= SPI.transfer(0);                  // read the low 8 bits
+  digitalWrite(CS_MCP3208, HIGH);             // disable chip select
 
-    return result;
+  return result;
 }
 
-// int readIMU() {
+void readIMU() {
+  accelX = imu.readFloatAccelX();
+  accelY = imu.readFloatAccelY();
+  accelZ = imu.readFloatAccelZ();
 
-// }
+  gyroX = imu.readFloatGyroX();
+  gyroY = imu.readFloatGyroY();
+  gyroZ = imu.readFloatGyroZ();
+
+  tempF = imu.readTempF();
+}
 
 void handleButtonPress() {
   
@@ -181,7 +207,15 @@ void loop() {
   if (currentTime - lastSampleTime >= sampleInterval) {
     lastSampleTime = currentTime;
 
+    readIMU();
     adcRaw = readADC(0);
+
+    // FIXME
+    velX = 0;
+    dispX = 0;
+    angle = 0;
+
+
     //adcCalibrated = adcRaw - adcOffset;
 
     float voltageBaseline = .074;
@@ -197,11 +231,24 @@ void loop() {
     Serial.println("Voltage:   " + String(voltage) + " V");
     Serial.println("Force:     " + String(kilograms) + " kg\n\n");
 
+    Serial.println("ACCELERATION");
+    Serial.printf("X: %.4f\n", accelX);
+    Serial.printf("Y: %.4f\n", accelY);
+    Serial.printf("Z: %.4f\n\n", accelZ);
+
+    Serial.println("GYROSCOPE");
+    Serial.printf("X: %.4f\n", gyroX);
+    Serial.printf("Y: %.4f\n", gyroY);
+    Serial.printf("Z: %.4f\n\n", gyroZ);
+
+    Serial.println("TEMPERATURE");
+    Serial.printf("F: %.4f\n\n", tempF);
+
     if (loggingEnabled) {
       
       if (file) {
       
-      file.printf("%.3f,%.3f,%.3f\n", seconds, kilograms, voltage);
+      file.printf("%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", seconds, kilograms, voltage, accelX, velX, dispX, gyroY, angle);
       file.flush();           // write data immediately
       //file.close();
       Serial.println("Wrote to file.");
