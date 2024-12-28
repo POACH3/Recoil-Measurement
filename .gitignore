@@ -1,0 +1,46 @@
+# macOS specific files
+.DS_Store
+.AppleDouble
+.Spotlight-V100
+.Trashes
+._*
+
+# Arduino IDE specific files
+*.ino.*
+*.cpp.*
+*.h.*
+*.elf
+*.bin
+*.hex
+*.eep
+*.d
+*.log
+*.tmp
+
+# Build directories (if using a custom build folder)
+build/
+build/*
+
+# User-specific configuration
+*.settings
+*.workspace
+
+# Library manager installations (if libraries are in a subfolder)
+libraries/
+libraries/*
+
+# Logs and temporary files
+*.log
+*.temp
+
+# Backup files (common extensions for temp/backup files)
+*.bak
+*.swp
+*.swo
+*.orig
+
+# Git directory
+.git/
+
+# Other system-generated files
+Thumbs.db

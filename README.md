@@ -18,8 +18,7 @@ IMU data is collected from the sensor (LSM6DS3) and logged. These values (accele
 All data is logged to a .csv file on an SD card.
 
 ## Future Functionality
-- muzzle flip angle measurement via IMU (LSM6DS3)
-- recoil distance measurement via IMU (LSM6DS3)
+- muzzle flip angle measurement
 - data buffer
 - smart logging (only write data when a shot is detected)
 - low pass filtering of the load cell values
