@@ -25,6 +25,30 @@ SdFat sd;
 FsFile file;
 
 LSM6DS3 imu( SPI_MODE, CS_IMU);
+int accelRange = 16;            // ±16 g range
+float accelSensitivity = 0.488; // sensitivity for ±16 g in mg/LSB
+int gyroRange = 2000;           // ±2000 dps range
+int gyroSensitivity = 70;       // sensitivity for ±2000 dps in mdps/LSB
+/*
+RMS noise levels:
+Accelerometer: 1.7 mg RMS at ±2 g (normal mode).
+Gyroscope: 140 mdps RMS in low-power mode.
+*/
+
+float axRaw;
+float ayRaw;
+float azRaw;
+float gxRaw;
+float gyRaw;
+float gzRaw;
+
+float pitch = 0;
+float roll = 0;
+
+float correctedAX;
+float correctedAY;
+float correctedAZ;
+
 float accelX;
 float accelY;
 float accelZ;
@@ -33,9 +57,16 @@ float gyroY;
 float gyroZ;
 float tempF;
 
-float velX;
-float dispX;
-float angle;
+float aX = 0;
+float vX = 0;
+float sX = 0;
+float angle = 0;
+
+float aY;
+float aZ;
+float gX;
+float gY;
+float gZ;
 
 
 MCP3208 adc;
@@ -50,11 +81,11 @@ float loadCellSensitivity = .001; // 1mV/V
 //float calibrationFactor = loadCellMaxWeight / (loadCellSensitivity * systemVoltage); // kg/V
 float calibrationFactor = loadCellMaxWeight / maxVoltage;
 
-unsigned long lastSampleTime = 0;    // Last sample time in microseconds
-unsigned long sampleInterval = 1000; // every 1000 microseconds
-
-int sampleRate = 1500; // 1500 samples/second
+int sampleRate = 500; // 1500 samples/second
 int clockRate = sampleRate * 20; // 30000 Hz
+
+unsigned long prevTime = 0;    // last sample time in microseconds
+unsigned long sampleInterval = (1.0 / sampleRate) * 1e6; // sample interval in microseconds
 
 unsigned long startTime;
 
@@ -105,13 +136,20 @@ void setup() {
   }
   Serial.println("File opened.");
 
-  file.println("TIMESTAMP,FORCE (kg),VOLTAGE (V),X ACCELERATION (g),X VELOCITY (m/s),X DISPLACEMENT (m), MUZZLE ANGULAR MOMENTUM (deg/s), MUZZLE RISE (deg)");
+  file.println("TIMESTAMP,X ACCELERATION (m/s^2),X VELOCITY (m/s),X DISPLACEMENT (m),MUZZLE ANGULAR MOMENTUM (deg/s),MUZZLE RISE (deg),FORCE (kg)");
   file.flush();
 
 
 
   if (imu.begin() != 0) { Serial.println("Problem starting the IMU."); }
   else { Serial.println("IMU started."); }
+
+  imu.settings.accelRange = accelRange;
+  imu.settings.accelSampleRate = sampleRate;
+  //imu.settings.accelEnabled = 1;
+  imu.settings.gyroRange = gyroRange;
+  imu.settings.gyroSampleRate = sampleRate;
+
 
 
 
@@ -157,16 +195,100 @@ int readADC(int channel) {
 }
 
 void readIMU() {
-  accelX = imu.readFloatAccelX();
-  accelY = imu.readFloatAccelY();
-  accelZ = imu.readFloatAccelZ();
 
-  gyroX = imu.readFloatGyroX();
-  gyroY = imu.readFloatGyroY();
-  gyroZ = imu.readFloatGyroZ();
+  axRaw = imu.readRawAccelX(); // raw accelerometer value for X-axis
+  ayRaw = imu.readRawAccelY();
+  azRaw = imu.readRawAccelZ();
+
+  gxRaw = imu.readRawGyroX();
+  gyRaw = imu.readRawGyroY();
+  gzRaw = imu.readRawGyroZ();
+
+  // accelX = imu.readFloatAccelX();
+  // accelY = imu.readFloatAccelY();
+  // accelZ = imu.readFloatAccelZ();
+
+  // gyroX = imu.readFloatGyroX();
+  // gyroY = imu.readFloatGyroY();
+  // gyroZ = imu.readFloatGyroZ();
 
   tempF = imu.readTempF();
 }
+
+void processDataIMU(float dt) {
+    
+  // aX = (axRaw * sensitivity / 1000.0 * 9.81) - 9.81; // acceleration in m/s²
+
+  // vX += aX * dt; // Integrate acceleration to get velocity
+  // sX += vX * dt; // Integrate velocity to get displacement
+
+  // Compute acceleration with sensitivity and convert to m/s²
+  aX = (axRaw * accelSensitivity / 1000.0 * 9.81);
+  aY = (ayRaw * accelSensitivity / 1000.0 * 9.81);
+  aZ = (azRaw * accelSensitivity / 1000.0 * 9.81);
+
+  gX = gxRaw * gyroSensitivity / 1000.0;
+  gY = gyRaw * gyroSensitivity / 1000.0;
+  gZ = gzRaw * gyroSensitivity / 1000.0;
+
+  // Apply dynamic gravity compensation
+  // float gravityCompensation = accelZ * 9.81;
+  // aX -= gravityCompensation;
+  estimateOrientation(aX, aY, aZ, gX, gY, dt);
+  removeGravity(aX, aY, aZ);
+
+  // low-pass filter to smooth acceleration data
+  static float filteredAX = 0, filteredAY = 0, filteredAZ = 0;
+  float alpha = 0.1; // smoothing factor
+  //filteredAX = alpha * aX + (1 - alpha) * filteredAX;
+  filteredAX = alpha * correctedAX + (1 - alpha) * filteredAX;
+  filteredAY = alpha * correctedAY + (1 - alpha) * filteredAY;
+  filteredAZ = alpha * correctedAZ + (1 - alpha) * filteredAZ;
+
+  aX = filteredAX;
+  aY = filteredAY;
+  aZ = filteredAZ;
+
+  vX += aX * dt; // integrate acceleration for velocity
+
+  if (abs(vX) < 0.01) vX = 0; // zero-velocity threshold to prevent drift
+
+  sX += vX * dt; // integrate velocity for displacement
+}
+
+void estimateOrientation(float ax, float ay, float az, float gx, float gy, float dt) {
+  // gyroscope readings to radians per second
+  gx *= DEG_TO_RAD;
+  gy *= DEG_TO_RAD;
+
+  // integrate gyroscope data for pitch and roll
+  pitch += gx * dt;
+  roll  += gy * dt;
+
+  // calculate pitch and roll from accelerometer data
+  float pitchAccel = atan2(ay, sqrt(ax * ax + az * az));
+  float rollAccel  = atan2(-ax, sqrt(ay * ay + az * az));
+
+  // complementary filter to combine accelerometer and gyroscope
+  float alpha = 0.98; // filter weight
+  //float alpha = dynamicCondition ? 0.98 : 0.95; // adjust if shot detected?
+  pitch = alpha * pitch + (1 - alpha) * pitchAccel;
+  roll  = alpha * roll + (1 - alpha) * rollAccel;
+}
+
+
+void removeGravity(float ax, float ay, float az) {
+  // gravity vector in IMU frame
+  float gX = -9.81 * sin(roll);
+  float gY =  9.81 * sin(pitch) * cos(roll);
+  float gZ =  9.81 * cos(pitch) * cos(roll);
+
+  // remove gravity from accelerometer readings
+  correctedAX = ax - gX;
+  correctedAY = ay - gY;
+  correctedAZ = az - gZ;
+}
+
 
 void handleButtonPress() {
   
@@ -204,16 +326,16 @@ void loop() {
   handleButtonPress();
 
   unsigned long currentTime = micros();
-  if (currentTime - lastSampleTime >= sampleInterval) {
-    lastSampleTime = currentTime;
+  if (currentTime - prevTime >= sampleInterval) {
+    float dt = (currentTime - prevTime) / 1e6; // delta t in seconds
+    prevTime = currentTime;
 
     readIMU();
     adcRaw = readADC(0);
 
-    // FIXME
-    velX = 0;
-    dispX = 0;
-    angle = 0;
+    processDataIMU(dt);
+
+    //angle = 0;
 
 
     //adcCalibrated = adcRaw - adcOffset;
@@ -225,7 +347,7 @@ void loop() {
     if (kilograms < 0) { kilograms = 0; }
 
     timestamp = millis();
-    seconds = (timestamp - startTime) / 1000;
+    seconds = (timestamp - startTime) / 1000.0;
 
     Serial.println("Timestamp: " + String(seconds) + " s");
     Serial.println("Voltage:   " + String(voltage) + " V");
@@ -248,7 +370,7 @@ void loop() {
       
       if (file) {
       
-      file.printf("%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", seconds, kilograms, voltage, accelX, velX, dispX, gyroY, angle);
+      file.printf("%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", seconds, aX, vX, sX, gyroY, angle, kilograms, seconds);
       file.flush();           // write data immediately
       //file.close();
       Serial.println("Wrote to file.");
