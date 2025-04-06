@@ -6,9 +6,9 @@ Date Started:  24-DEC-2024
 ---
 
 # Recoil Measurement Fixture
-This test stand will deliver precise metrics to quantitatively assess rifle recoil and muzzle rise. Any rifle setup may be evaluated (to satisfy curiosity and to tune it with weights, muzzle brakes, etc), but the express intent is to optimize gas-operated firearms.
-
 This project's purpose is to more fully understand the interplay between the gas block, buffer weight, and buffer spring of AR style weapons and how they affect felt recoil and muzzle rise.
+
+This test stand will deliver precise metrics to quantitatively assess rifle recoil and muzzle rise. Any rifle setup may be evaluated (to satisfy curiosity and to tune it with weights, muzzle brakes, etc), but the express intent is to optimize gas-operated firearms.
 
 ## Hardware
 - Teensy 4.1
@@ -24,7 +24,7 @@ This project's purpose is to more fully understand the interplay between the gas
 
 Under rifle recoil, the IMU selected will likely produced clipped acceleration values. In the case that this happens, a high g accelerometer will be added to the system to supplement the LSM6DS3.
 
-Reference the accompanying [circuit diagram](https://github.com/POACH3/Recoil-Measurement/blob/main/circuit_diagram.jpeg) and [sketch](https://github.com/POACH3/Recoil-Measurement/blob/main/circuit_sketch.jpeg).
+Reference the accompanying [circuit diagram](https://github.com/POACH3/Recoil-Measurement/blob/main/circuit_diagram.png) and [sketch](https://github.com/POACH3/Recoil-Measurement/blob/main/circuit_sketch.jpeg).
 
 Additionally, a custom [printed circuit board](https://github.com/POACH3/Recoil-Measurement/blob/main/PCB.kicad_pro) has been designed in order for design constraints to be met.
 
