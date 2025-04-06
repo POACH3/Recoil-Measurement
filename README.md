@@ -24,7 +24,7 @@ This test stand will deliver precise metrics to quantitatively assess rifle reco
 
 Under rifle recoil, the IMU selected will likely produced clipped acceleration values. In the case that this happens, a high g accelerometer will be added to the system to supplement the LSM6DS3.
 
-Reference the accompanying [circuit diagram](https://github.com/POACH3/Recoil-Measurement/blob/main/circuit_diagram.png) and [sketch](https://github.com/POACH3/Recoil-Measurement/blob/main/circuit_sketch.jpeg).
+Reference the accompanying [circuit diagram](https://github.com/POACH3/Recoil-Measurement/blob/main/circuit_diagram.png) and [sketch](https://github.com/POACH3/Recoil-Measurement/blob/main/circuit_sketch.png).
 
 Additionally, a custom [printed circuit board](https://github.com/POACH3/Recoil-Measurement/blob/main/PCB.kicad_pro) has been designed in order for design constraints to be met.
 
