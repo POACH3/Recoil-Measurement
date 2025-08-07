@@ -1,10 +1,10 @@
 /*
-AUTHOR:   Trenton S
-PURPOSE:  Measure force
+AUTHOR:   T. Stratton
+PURPOSE:  Recoil Test
 NOTES: 
-    - create a new file for each session (datetime is in file name)
-    - integrate IMU values to get displacement distance and angle
-    - add read instruments and process measurements methods
+  - memcpy() for sample copying
+  - batch read all IMU axes (fifo or low level example code by SparkFun)
+  - hardcode SPI transfer command in readADC()
 
 */
 
@@ -14,387 +14,282 @@ NOTES:
 #include <MCP3208.h>
 #include <TimerOne.h>
 
-// Teensy 4.1
-#define CLOCK_PIN 13  // D13 SPI clock
-#define MISO_PIN 12   // D12 SPI MOSI
-#define MOSI_PIN 11   // D11 SPI MISO
-#define CS_MCP3208 10 // D10 force sensor chip select
-#define CS_IMU 9      // D9 IMU sensor chip select
+const bool logging = true; // enable logging to SD card
+
+  // Teensy 4.1 pinout
+constexpr int BUTTON_PIN = 2;  // D2 push button
+constexpr int LED_PIN = 3;     // D3 LED light
+constexpr int CS_IMU = 9;      // D9 IMU sensor chip select
+constexpr int CS_MCP3208 = 10; // D10 force sensor chip select
+constexpr int MOSI_PIN = 11;   // D11 SPI MOSI
+constexpr int MISO_PIN = 12;   // D12 SPI MISO
+constexpr int CLOCK_PIN = 13;  // D13 SPI clock
+
 
 SdFat sd;
 FsFile file;
+IntervalTimer sampleTimer;
 
-LSM6DS3 imu( SPI_MODE, CS_IMU);
-int accelRange = 16;            // ±16 g range
-float accelSensitivity = 0.488; // sensitivity for ±16 g in mg/LSB
-int gyroRange = 2000;           // ±2000 dps range
-int gyroSensitivity = 70;       // sensitivity for ±2000 dps in mdps/LSB
+const int sampleRate = 1000; // Hertz (samples/second) - try to increase as much as possible (maybe 1500 or even up to 2000 samples/second?)
+//const int clockRate = sampleRate * 20; // 30000 Hz     figure out what 20 is
+const int clockRate = 1000000; // Hz, max MCP3208 can handle is 1.8MHz
+
+  // IMU
+LSM6DS3 imu(SPI_MODE, CS_IMU);
+const int accelRange = 16;            // ±16 g range
+const float accelSensitivity = 0.488; // sensitivity for ±16 g in mg/LSB
+const int gyroRange = 2000;           // ±2000 dps range
+const int gyroSensitivity = 70;       // sensitivity for ±2000 dps in mdps/LSB
+const float gyroCal = gyroSensitivity / 1000.0f;           // gyroscope calibration scaling factor
+const float accelCal = accelSensitivity / 1000.0f * 9.81f; // accelerometer calibration scaling factor
 /*
 RMS noise levels:
 Accelerometer: 1.7 mg RMS at ±2 g (normal mode).
 Gyroscope: 140 mdps RMS in low-power mode.
 */
+float imuData[7];
 
-float axRaw;
-float ayRaw;
-float azRaw;
-float gxRaw;
-float gyRaw;
-float gzRaw;
+  // LOAD CELL
+MCP3208 adc; //
 
-float pitch = 0;
-float roll = 0;
+float systemVoltage = 5.18; // volts (selected because 5V is min voltage for this load cell to function) 5.08V w/o USB, 5.18V w/USB plugged in
+float loadCellSensitivity = .001; // 1 mV/V
+float loadCellMaxWeight = 50.0; // kg (max rated capacity for this load cell)
+int amplifierGain = 604; // from the 100Ohm resister
+float amplifierMaxVoltage = systemVoltage * loadCellSensitivity * amplifierGain; // volts (.00508*604 - gain selected because 3.3V is the max the Teensy can receive from the ADC)
+float adcMaxValue = 4095.0; // max output value for the max weight from 12 bit ADC
+//float maxVoltage = 3.02; // 50 (max weight) * .001 (sensitivity) * 604 (gain determined by 100 Ohm resistor)
+//float maxVoltage = loadCellSensitivity * systemVoltage * 604;
 
-float correctedAX;
-float correctedAY;
-float correctedAZ;
-
-float accelX;
-float accelY;
-float accelZ;
-float gyroX;
-float gyroY;
-float gyroZ;
-float tempF;
-
-float aX = 0;
-float vX = 0;
-float sX = 0;
-float angle = 0;
-
-float aY;
-float aZ;
-float gX;
-float gY;
-float gZ;
-
-
-MCP3208 adc;
 uint16_t adcRaw;
-uint16_t adcCalibrated;
-uint16_t adcOffset;
+float adcOffset; // baseline measurement (reading with nothing on the load cell)
+//float voltageOffset; // baseline measurement converted to a voltage - figure out how determined (.074 used prior)
 
-float systemVoltage = 5.0; // volts
-float loadCellMaxWeight = 50.0; // kg
-float maxVoltage = 3.02; // 50 * .001 * 604
-float loadCellSensitivity = .001; // 1mV/V
-//float calibrationFactor = loadCellMaxWeight / (loadCellSensitivity * systemVoltage); // kg/V
-float calibrationFactor = loadCellMaxWeight / maxVoltage;
+const float knownWeight = 29.48;
+const int knownRawAdc = 3570;
+//const float knownVoltage = .03;
+float forceCal; // kg/V (force calibration scaling factor relies on empirical measurements)
+//const float forceCal = loadCellMaxWeight / maxVoltage; // kg/V (force calibration scaling factor relies on empirical measurements)
+//const float forceCal = loadCellMaxWeight / (loadCellSensitivity * systemVoltage); // kg/V (force calibration scaling factor relies on accurate specs)
 
-int sampleRate = 500; // 1500 samples/second
-int clockRate = sampleRate * 20; // 30000 Hz
 
-unsigned long prevTime = 0;    // last sample time in microseconds
-unsigned long sampleInterval = (1.0 / sampleRate) * 1e6; // sample interval in microseconds
-
-unsigned long startTime;
-
-const int buttonPin = 2;
-const int ledPin = 3;
-
+  // BUTTON
+/*
 int currentButtonState = HIGH;        // Current button state
 int lastButtonState = HIGH;    // Previous button state
 unsigned long lastDebounceTime = 0; // Time of the last debounce
 unsigned long debounceDelay = 50;  // Debounce delay (ms)
-//bool ledState = false;         // Current LED state (on/off)
+*/
 
-bool loggingEnabled = false;
 
-unsigned long timestamp;
-float seconds;
+/**
+  Reads raw acceleration and gyroscope values from IMU.
+*/
+void readIMU() {
+/*
+  imuData[0] = imu.readRawAccelX();
+  imuData[1] = imu.readRawAccelY();
+  imuData[2] = imu.readRawAccelZ();
+  imuData[3] = imu.readRawGyroX();
+  imuData[4] = imu.readRawGyroY();
+  imuData[5] = imu.readRawGyroZ();
+  imuData[6] = imu.readTempF();
+*/
+  imuData[0] = imu.readFloatAccelX();
+  imuData[1] = imu.readFloatAccelY();
+  imuData[2] = imu.readFloatAccelZ();
+  imuData[3] = imu.readFloatGyroX();
+  imuData[4] = imu.readFloatGyroY();
+  imuData[5] = imu.readFloatGyroZ();
+  imuData[6] = imu.readTempF();
+
+}
+
+/**
+  Reads raw force value (as a voltage) from the ADC.
+*/
+int readADC(int channel) {
+  SPI.beginTransaction(SPISettings(clockRate, MSBFIRST, SPI_MODE0));
+  digitalWrite(CS_MCP3208, LOW);              // enable chip select
+  
+  byte command = 0b00000110 | (channel << 2); // start bit + single-ended bit + channel
+  SPI.transfer(command);                      // send command  --  consider hardcoding since only channel 0 is used
+  int result = SPI.transfer(0) & 0x0F;        // read the high 4 bits
+  result <<= 8;                               // shift high bits
+  result |= SPI.transfer(0);                  // read the low 8 bits
+
+  digitalWrite(CS_MCP3208, HIGH);             // disable chip select
+  SPI.endTransaction();
+
+  return result;
+}
+
+
+void logData() {
+    float kilograms = (adcRaw - adcOffset) * forceCal;
+    if (kilograms < 0) { kilograms = 0; }
+
+    float seconds = micros() / 1000000.0;
+
+  // save to SD card
+  if (logging) {
+    if (file) {
+      //file.printf("%.3f,%u,%f,%.3f\n", seconds, adcRaw, (adcRaw - adcOffset), kilograms); // load cell
+      //file.printf("%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", seconds, imuData[0], imuData[1], imuData[2], imuData[3], imuData[4], imuData[5], imuData[6]); // imu
+      
+      // all sensors
+      file.printf("%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%u,%f,%.3f\n", 
+                      seconds,
+                      imuData[0], imuData[1], imuData[2],
+                      imuData[3], imuData[4], imuData[5],
+                      imuData[6],
+                      adcRaw, (adcRaw - adcOffset), kilograms);
+      
+      file.flush();
+      //file.sync();
+      //Serial.println("Wrote samples to file.");
+
+    } else {
+      //Serial.println("Error writing to file.");
+    }
+  } else {
+    Serial.println("Timestamp:       " + String(seconds) + " s\n");
+
+    Serial.println("FORCE");
+    Serial.println("Raw ADC:         " + String(adcRaw));
+    Serial.println("Compensated ADC: " + String(adcRaw - adcOffset) + "        " + String((adcRaw - adcOffset) / adcMaxValue) + " %");
+    Serial.printf("Force:           %.4f kg   %.2f \%\n\n", kilograms, (kilograms/loadCellMaxWeight)*100);
+
+    Serial.println("ACCELERATION");
+    Serial.printf("X: %.4f\n", imuData[0]);
+    Serial.printf("Y: %.4f\n", imuData[1]);
+    Serial.printf("Z: %.4f\n\n", imuData[2]);
+
+    Serial.println("GYROSCOPE");
+    Serial.printf("X: %.4f\n", imuData[3]);
+    Serial.printf("Y: %.4f\n", imuData[4]);
+    Serial.printf("Z: %.4f\n\n", imuData[5]);
+
+    Serial.println("TEMPERATURE");
+    Serial.printf("F: %.4f\n\n\n", imuData[6]);
+
+    delay(10);
+  }
+
+}
+
+
+/*
+  An interrupt service routine to sample the sensors.
+*/
+void FASTRUN sampleISR() {
+
+  readIMU();
+  adcRaw = readADC(0);
+
+}
+
 
 void setup() {
   
-  pinMode(buttonPin, INPUT_PULLUP);
-  pinMode(ledPin, OUTPUT);
-  digitalWrite(ledPin, LOW);
+  //pinMode(buttonPin, INPUT_PULLUP);
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(CS_MCP3208, OUTPUT);
+  pinMode(CS_IMU, OUTPUT);
 
+  digitalWrite(LED_PIN, HIGH);
+  digitalWrite(CS_MCP3208, HIGH);
+  digitalWrite(CS_IMU, HIGH);
 
   Serial.begin(9600);
-  delay(1000);
+  delay(3000);
 
-  if (!sd.begin(SdioConfig())) {
-    Serial.println("SD card initialization failed!");
-    return;
-  }
-  Serial.println("SD card initialized.");
+  digitalWrite(LED_PIN, LOW);
 
-  // delete the file if it already exists
-  if (sd.exists("recoil_data.csv")) {
-    if (!sd.remove("recoil_data.csv")) {
-      Serial.println("Error deleting the file.");
+  // setup logging to SD
+  if (logging) {
+    if (!sd.begin(SdioConfig())) {
+      Serial.println("SD card initialization failed!");
       return;
     }
-    Serial.println("File deleted.");
+    Serial.println("SD card initialized.");
+
+    // delete the file if it already exists
+    if (sd.exists("recoil_data.csv")) {
+      if (!sd.remove("recoil_data.csv")) {
+        Serial.println("Error deleting the file.");
+        return;
+      }
+      Serial.println("File deleted.");
+    }
+
+    // create and open the file
+    file = sd.open("recoil_data.csv", O_RDWR | O_CREAT | O_AT_END);
+    if (!file) {
+      Serial.println("Error opening file.");
+      return;
+    }
+    Serial.println("File opened.");
+
+    file.println("TIMESTAMP,X ACCELERATION (m/s^2),Y ACCELERATION (m/s^2),Z ACCELERATION (m/s^2),X GYROSCOPE (deg/s),Y GYROSCOPE (deg/s),Z GYROSCOPE (deg/s),TEMP (F),F_RAW,F_CORRECTED,FORCE (kg)");
+    file.flush();
+    file.sync();
   }
 
-  // create and open the file
-  file = sd.open("recoil_data.csv", O_RDWR | O_CREAT | O_AT_END);
-  if (!file) {
-    Serial.println("Error opening file.");
-    return;
-  }
-  Serial.println("File opened.");
 
-  file.println("TIMESTAMP,X ACCELERATION (m/s^2),X VELOCITY (m/s),X DISPLACEMENT (m),MUZZLE ANGULAR MOMENTUM (deg/s),MUZZLE RISE (deg),FORCE (kg)");
-  file.flush();
+  SPI.begin();
 
-
-
-  if (imu.begin() != 0) { Serial.println("Problem starting the IMU."); }
-  else { Serial.println("IMU started."); }
-
+    // setup IMU
   imu.settings.accelRange = accelRange;
   imu.settings.accelSampleRate = sampleRate;
   //imu.settings.accelEnabled = 1;
   imu.settings.gyroRange = gyroRange;
   imu.settings.gyroSampleRate = sampleRate;
 
+  if (imu.begin() != 0) {
+    Serial.println("Problem starting the IMU.");
+  } else {
+    Serial.println("IMU started.");
+  }
 
-
-
-  pinMode(CS_MCP3208, OUTPUT);
-  //pinMode(CS_IMU, OUTPUT);
-
-  SPI.begin();
-  SPI.beginTransaction(SPISettings(clockRate, MSBFIRST, SPI_MODE0));
-
-  digitalWrite(CS_MCP3208, HIGH);
-  //digitalWrite(CS_IMU, HIGH);
-  
+  // setup adc and calibrate
 	adc.begin();
 	adc.analogReadResolution(12);
 
   Serial.println("\nCalibrating...");
-  delay(3000);
+  digitalWrite(LED_PIN, HIGH);
+  delay(1000);
   
   float sum = 0;
-  for (int i = 0; i < 20; i++) {
-      sum += adc.analogRead(0);
-      delay(100);
+  int n = 200;
+  for (int i = 0; i < n; i++) {
+      //sum += adc.analogRead(0);
+      sum += readADC(0);
+      delay(10);
   }
-  adcOffset = sum / 20;
+  adcOffset = sum / n;
+  forceCal = knownWeight / (knownRawAdc - adcOffset);
   
   Serial.print("OFFSET: ");
   Serial.println(adcOffset);
-  delay(2000);
+  delay(1000);
+  digitalWrite(LED_PIN, LOW);
 
-  startTime = millis();
+  sampleTimer.begin(sampleISR, (unsigned long)(1e6/sampleRate)); // consider integer math
 }
 
-int readADC(int channel) {
-  byte command = 0b00000110 | (channel << 2); // start bit + single-ended bit + channel
-  digitalWrite(CS_MCP3208, LOW);              // enable chip select
-  SPI.transfer(command);                      // send command
-  int result = SPI.transfer(0) & 0x0F;        // read the high 4 bits
-  result <<= 8;                               // shift high bits
-  result |= SPI.transfer(0);                  // read the low 8 bits
-  digitalWrite(CS_MCP3208, HIGH);             // disable chip select
-
-  return result;
-}
-
-void readIMU() {
-
-  axRaw = imu.readRawAccelX(); // raw accelerometer value for X-axis
-  ayRaw = imu.readRawAccelY();
-  azRaw = imu.readRawAccelZ();
-
-  gxRaw = imu.readRawGyroX();
-  gyRaw = imu.readRawGyroY();
-  gzRaw = imu.readRawGyroZ();
-
-  // accelX = imu.readFloatAccelX();
-  // accelY = imu.readFloatAccelY();
-  // accelZ = imu.readFloatAccelZ();
-
-  // gyroX = imu.readFloatGyroX();
-  // gyroY = imu.readFloatGyroY();
-  // gyroZ = imu.readFloatGyroZ();
-
-  tempF = imu.readTempF();
-}
-
-void processDataIMU(float dt) {
-    
-  // aX = (axRaw * sensitivity / 1000.0 * 9.81) - 9.81; // acceleration in m/s²
-
-  // vX += aX * dt; // Integrate acceleration to get velocity
-  // sX += vX * dt; // Integrate velocity to get displacement
-
-  // Compute acceleration with sensitivity and convert to m/s²
-  aX = (axRaw * accelSensitivity / 1000.0 * 9.81);
-  aY = (ayRaw * accelSensitivity / 1000.0 * 9.81);
-  aZ = (azRaw * accelSensitivity / 1000.0 * 9.81);
-
-  gX = gxRaw * gyroSensitivity / 1000.0;
-  gY = gyRaw * gyroSensitivity / 1000.0;
-  gZ = gzRaw * gyroSensitivity / 1000.0;
-
-  // Apply dynamic gravity compensation
-  // float gravityCompensation = accelZ * 9.81;
-  // aX -= gravityCompensation;
-  estimateOrientation(aX, aY, aZ, gX, gY, dt);
-  removeGravity(aX, aY, aZ);
-
-  // low-pass filter to smooth acceleration data
-  static float filteredAX = 0, filteredAY = 0, filteredAZ = 0;
-  float alpha = 0.1; // smoothing factor
-  //filteredAX = alpha * aX + (1 - alpha) * filteredAX;
-  filteredAX = alpha * correctedAX + (1 - alpha) * filteredAX;
-  filteredAY = alpha * correctedAY + (1 - alpha) * filteredAY;
-  filteredAZ = alpha * correctedAZ + (1 - alpha) * filteredAZ;
-
-  aX = filteredAX;
-  aY = filteredAY;
-  aZ = filteredAZ;
-
-  vX += aX * dt; // integrate acceleration for velocity
-
-  if (abs(vX) < 0.01) vX = 0; // zero-velocity threshold to prevent drift
-
-  sX += vX * dt; // integrate velocity for displacement
-}
-
-void estimateOrientation(float ax, float ay, float az, float gx, float gy, float dt) {
-  // gyroscope readings to radians per second
-  gx *= DEG_TO_RAD;
-  gy *= DEG_TO_RAD;
-
-  // integrate gyroscope data for pitch and roll
-  pitch += gx * dt;
-  roll  += gy * dt;
-
-  // calculate pitch and roll from accelerometer data
-  float pitchAccel = atan2(ay, sqrt(ax * ax + az * az));
-  float rollAccel  = atan2(-ax, sqrt(ay * ay + az * az));
-
-  // complementary filter to combine accelerometer and gyroscope
-  float alpha = 0.98; // filter weight
-  //float alpha = dynamicCondition ? 0.98 : 0.95; // adjust if shot detected?
-  pitch = alpha * pitch + (1 - alpha) * pitchAccel;
-  roll  = alpha * roll + (1 - alpha) * rollAccel;
-}
-
-
-void removeGravity(float ax, float ay, float az) {
-  // gravity vector in IMU frame
-  float gX = -9.81 * sin(roll);
-  float gY =  9.81 * sin(pitch) * cos(roll);
-  float gZ =  9.81 * cos(pitch) * cos(roll);
-
-  // remove gravity from accelerometer readings
-  correctedAX = ax - gX;
-  correctedAY = ay - gY;
-  correctedAZ = az - gZ;
-}
-
-
-void handleButtonPress() {
-  
-  int buttonState = digitalRead(buttonPin);
-
-  if (buttonState != lastButtonState) { lastDebounceTime = millis(); } // reset debounce timer
-
-  if ((millis() - lastDebounceTime) > debounceDelay) {
-    // if button state has stabilized
-    if (buttonState != currentButtonState) {
-      currentButtonState = buttonState;
-
-      // toggle logging state on button press
-      if (currentButtonState == HIGH) {
-        if (loggingEnabled) {
-          loggingEnabled = false;
-          digitalWrite(ledPin, LOW);
-        } else {
-          loggingEnabled = true;
-          digitalWrite(ledPin, HIGH);
-        }
-      }
-
-      //loggingEnabled = !loggingEnabled;
-      //digitalWrite(ledPin, loggingEnabled ? HIGH : LOW); // Update LED
-
-    }
-  }
-
-  lastButtonState = buttonState; // save last button state
-}
 
 void loop() {
 
-  handleButtonPress();
-
-  unsigned long currentTime = micros();
-  if (currentTime - prevTime >= sampleInterval) {
-    float dt = (currentTime - prevTime) / 1e6; // delta t in seconds
-    prevTime = currentTime;
-
-    readIMU();
-    adcRaw = readADC(0);
-
-    processDataIMU(dt);
-
-    //angle = 0;
-
-
-    //adcCalibrated = adcRaw - adcOffset;
-
-    float voltageBaseline = .074;
-    float voltage = ((adcRaw / 4095.0) * maxVoltage) - voltageBaseline;
-    float kilograms = voltage * calibrationFactor;
-
-    if (kilograms < 0) { kilograms = 0; }
-
-    timestamp = millis();
-    seconds = (timestamp - startTime) / 1000.0;
-
-    Serial.println("Timestamp: " + String(seconds) + " s");
-    Serial.println("Voltage:   " + String(voltage) + " V");
-    Serial.println("Force:     " + String(kilograms) + " kg\n\n");
-
-    Serial.println("ACCELERATION");
-    Serial.printf("X: %.4f\n", accelX);
-    Serial.printf("Y: %.4f\n", accelY);
-    Serial.printf("Z: %.4f\n\n", accelZ);
-
-    Serial.println("GYROSCOPE");
-    Serial.printf("X: %.4f\n", gyroX);
-    Serial.printf("Y: %.4f\n", gyroY);
-    Serial.printf("Z: %.4f\n\n", gyroZ);
-
-    Serial.println("TEMPERATURE");
-    Serial.printf("F: %.4f\n\n", tempF);
-
-    if (loggingEnabled) {
-      
-      if (file) {
-      
-      file.printf("%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", seconds, aX, vX, sX, gyroY, angle, kilograms, seconds);
-      file.flush();           // write data immediately
-      //file.close();
-      Serial.println("Wrote to file.");
-
-      // Serial.println("Voltage:   " + String(voltage) + " V");
-      // Serial.println("Force:     " + String(kilograms) + " kg\n\n");
-      } else {
-        Serial.println("Error writing to file.");
-      }
-    }
-
+  //handleButtonPress();
+  
+  //printData();
+  if (logging) {
+    logData();
+  } else {
+    logData();
+    delay(10);
   }
 
-  // adcRaw = readADC(0);
-  // adcCalibrated = adcRaw - adcOffset;
-
-  // float voltageBaseline = .074;
-  // float voltage = ((adcRaw / 4095.0) * maxVoltage) - voltageBaseline;
-  // float kilograms = voltage * calibrationFactor;
-  
-  // Serial.println("ADC Value: " + String(adcCalibrated));
-  // Serial.println("Voltage:   " + String(voltage) + " V");
-  // Serial.println("Force:     " + String(kilograms) + " kg");
-  // Serial.println();
-  // delay(1000);
 
 }
