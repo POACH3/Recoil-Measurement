@@ -2,9 +2,19 @@
 AUTHOR:   T. Stratton
 PURPOSE:  Recoil Test
 NOTES: 
-  - memcpy() for sample copying
-  - batch read all IMU axes (fifo or low level example code by SparkFun)
-  - hardcode SPI transfer command in readADC()
+    - create a new file for each session (datetime is in file name)
+    - integrate IMU values to get displacement distance and angle
+    - add read instruments and process measurements methods
+
+    - memcpy() for sample copying
+    - batch read all IMU axes (fifo or low level example code by SparkFun)
+    - hardcode SPI transfer command in readADC()
+    - write raw values in binary
+    - process data later
+    - move sensor reads outside of ISR
+    - keep SPI open?, no beginTransaction in ISR
+
+    - blend IMU values for a given orientation
 
 */
 
@@ -13,6 +23,59 @@ NOTES:
 #include "SparkFunLSM6DS3.h"
 #include <MCP3208.h>
 #include <TimerOne.h>
+
+
+struct SensorData {
+  uint32_t timestamp; // microseconds
+  float ax, ay, az;
+  float gx, gy, gz;
+  float force;
+
+  SensorData(uint32_t timestamp = 0,
+          float ax = 0.0f, float ay = 0.0f, float az = 0.0f,
+          float gx = 0.0f, float gy = 0.0f, float gz = 0.0f,
+          float force = 0.0f)
+        : timestamp(timestamp),
+          ax(ax), ay(ay), az(az),
+          gx(gx), gy(gy), gz(gz),
+          force(force) {}
+
+  SensorData& operator=(const SensorData& other) {
+    if (this != &other) {
+      timestamp = other.timestamp;
+      ax = other.ax; ay = other.ay; az = other.az;
+      gx = other.gx; gy = other.gy; gz = other.gz;
+      force = other.force;
+    }
+    return *this;
+  }
+
+  // assignment from volatile SensorData
+  SensorData& operator=(const volatile SensorData& other) {
+    timestamp = other.timestamp;
+    ax = other.ax;
+    ay = other.ay;
+    az = other.az;
+    gx = other.gx;
+    gy = other.gy;
+    gz = other.gz;
+    force = other.force;
+    return *this;
+  }
+
+  void print() const {
+    Serial.println("Time:  " + String(timestamp) + "us");
+    Serial.println("Accel: " + String(ax) + ", " + String(ay) + ", " + String(az));
+    Serial.println("Gyro:  " + String(gx) + ", " + String(gy) + ", " + String(gz));
+    Serial.println("Force: " + String(force));
+  }
+
+};
+
+#define FILE_NAME "recoil_data"
+char binaryFileName[32];
+char csvFileName[32];
+//int fileIndex;
 
 const bool logging = true; // enable logging to SD card
 
@@ -27,12 +90,19 @@ constexpr int CLOCK_PIN = 13;  // D13 SPI clock
 
 
 SdFat sd;
-FsFile file;
+FatVolume volume;
+FatFile binFile;
+FsFile csvFile;
+
 IntervalTimer sampleTimer;
 
-const int sampleRate = 1000; // Hertz (samples/second) - try to increase as much as possible (maybe 1500 or even up to 2000 samples/second?)
+const int sampleRate = 9000; // Hertz (samples/second) - try to increase as much as possible (up to 40k samples/second?)
 //const int clockRate = sampleRate * 20; // 30000 Hz     figure out what 20 is
-const int clockRate = 1000000; // Hz, max MCP3208 can handle is 1.8MHz
+const int spiClockRate = 1750000; // Hz, max MCP3208 can handle is 1.8MHz
+
+uint32_t clusterSizeBytes = 32768; // figure out what the SD card cluster size is
+const uint32_t fileSize = 64UL * 1024 * 1024; // a bit over 3 minutes of logging time (seconds * samples/second * bytes/sample) 3 * 10000 * 32
+uint32_t numClusters = (fileSize + clusterSizeBytes - 1) / clusterSizeBytes;
 
   // IMU
 LSM6DS3 imu(SPI_MODE, CS_IMU);
@@ -72,20 +142,23 @@ float forceCal; // kg/V (force calibration scaling factor relies on empirical me
 //const float forceCal = loadCellMaxWeight / maxVoltage; // kg/V (force calibration scaling factor relies on empirical measurements)
 //const float forceCal = loadCellMaxWeight / (loadCellSensitivity * systemVoltage); // kg/V (force calibration scaling factor relies on accurate specs)
 
+const int BUFFER_SIZE = 8192;
+volatile SensorData data_buffer[BUFFER_SIZE];
+int numSamplesAvailable = 0;
+int readIdx = 0;
+volatile int writeIdx = 0;
 
   // BUTTON
-/*
-int currentButtonState = HIGH;        // Current button state
-int lastButtonState = HIGH;    // Previous button state
-unsigned long lastDebounceTime = 0; // Time of the last debounce
-unsigned long debounceDelay = 50;  // Debounce delay (ms)
-*/
+int currentButtonState = HIGH;      // current button state
+int lastButtonState = HIGH;         // previous button state
+unsigned long lastDebounceTime = 0; // time of the last debounce
+unsigned long debounceDelay = 50;   // debounce delay (ms)
 
 
 /**
   Reads raw acceleration and gyroscope values from IMU.
 */
-void readIMU() {
+void readIMU(volatile SensorData& s) {
 /*
   imuData[0] = imu.readRawAccelX();
   imuData[1] = imu.readRawAccelY();
@@ -94,7 +167,7 @@ void readIMU() {
   imuData[4] = imu.readRawGyroY();
   imuData[5] = imu.readRawGyroZ();
   imuData[6] = imu.readTempF();
-*/
+
   imuData[0] = imu.readFloatAccelX();
   imuData[1] = imu.readFloatAccelY();
   imuData[2] = imu.readFloatAccelZ();
@@ -102,79 +175,157 @@ void readIMU() {
   imuData[4] = imu.readFloatGyroY();
   imuData[5] = imu.readFloatGyroZ();
   imuData[6] = imu.readTempF();
-
+*/
+  s.ax = imu.readFloatAccelX();
+  s.ay = imu.readFloatAccelY();
+  s.az = imu.readFloatAccelZ();
+  s.gx = imu.readFloatGyroX();
+  s.gy = imu.readFloatGyroY();
+  s.gz = imu.readFloatGyroZ();
 }
 
 /**
-  Reads raw force value (as a voltage) from the ADC.
+  Reads raw force value from the ADC.
 */
-int readADC(int channel) {
-  SPI.beginTransaction(SPISettings(clockRate, MSBFIRST, SPI_MODE0));
-  digitalWrite(CS_MCP3208, LOW);              // enable chip select
+void readADC(volatile SensorData& s) {
+  SPI.beginTransaction(SPISettings(spiClockRate, MSBFIRST, SPI_MODE0));
+  digitalWrite(CS_MCP3208, LOW);              // enable chip select, use digitalWriteFast() or GPIO6_PSOR = (1 << 14)
   
+  int channel = 0;
   byte command = 0b00000110 | (channel << 2); // start bit + single-ended bit + channel
   SPI.transfer(command);                      // send command  --  consider hardcoding since only channel 0 is used
   int result = SPI.transfer(0) & 0x0F;        // read the high 4 bits
   result <<= 8;                               // shift high bits
   result |= SPI.transfer(0);                  // read the low 8 bits
 
-  digitalWrite(CS_MCP3208, HIGH);             // disable chip select
+  digitalWrite(CS_MCP3208, HIGH);             // disable chip select, use digitalWriteFast() or GPIO6_PCOR = (1 << 14)
   SPI.endTransaction();
 
-  return result;
+  s.force = result;
 }
 
 
+void printData() {
+  
+  float kilograms = (data_buffer[writeIdx].force - adcOffset) * forceCal;
+  if (kilograms < 0) { kilograms = 0; }
+
+  float seconds = data_buffer[writeIdx].timestamp / 1000000.0;
+
+  Serial.println("Timestamp:       " + String(seconds) + " s\n");
+
+  Serial.println("FORCE");
+  //Serial.println("Raw ADC:         " + String(adcRaw));
+  //Serial.println("Compensated ADC: " + String(adcRaw - adcOffset) + "        " + String((adcRaw - adcOffset) / adcMaxValue) + " %");
+  Serial.printf("Force:           %.4f kg   %.2f \%\n\n", kilograms, (kilograms/loadCellMaxWeight)*100);
+
+  Serial.println("ACCELERATION");
+  Serial.printf("X: %.4f\n", data_buffer[writeIdx].ax);
+  Serial.printf("Y: %.4f\n", data_buffer[writeIdx].ay);
+  Serial.printf("Z: %.4f\n\n", data_buffer[writeIdx].az);
+
+  Serial.println("GYROSCOPE");
+  Serial.printf("X: %.4f\n", data_buffer[writeIdx].gx);
+  Serial.printf("Y: %.4f\n", data_buffer[writeIdx].gy);
+  Serial.printf("Z: %.4f\n\n", data_buffer[writeIdx].gz);
+/*
+  Serial.println("TEMPERATURE");
+  Serial.printf("F: %.4f\n\n\n", imuData[6]);
+*/
+}
+
 void logData() {
-    float kilograms = (adcRaw - adcOffset) * forceCal;
-    if (kilograms < 0) { kilograms = 0; }
+  
+  if (binFile) {
+    for (int i = 0; i < 2048; i++) {
 
-    float seconds = micros() / 1000000.0;
-
-  // save to SD card
-  if (logging) {
-    if (file) {
-      //file.printf("%.3f,%u,%f,%.3f\n", seconds, adcRaw, (adcRaw - adcOffset), kilograms); // load cell
-      //file.printf("%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", seconds, imuData[0], imuData[1], imuData[2], imuData[3], imuData[4], imuData[5], imuData[6]); // imu
-      
+      //binFile.printf("%.3f,%u,%f,%.3f\n", seconds, adcRaw, (adcRaw - adcOffset), kilograms); // load cell
+      //binFile.printf("%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", seconds, imuData[0], imuData[1], imuData[2], imuData[3], imuData[4], imuData[5], imuData[6]); // imu
+        
       // all sensors
-      file.printf("%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%u,%f,%.3f\n", 
-                      seconds,
-                      imuData[0], imuData[1], imuData[2],
-                      imuData[3], imuData[4], imuData[5],
-                      imuData[6],
-                      adcRaw, (adcRaw - adcOffset), kilograms);
+      /*
+      binFile.printf("%u,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", 
+                    data_buffer[readIdx].timestamp,
+                    data_buffer[readIdx].ax, data_buffer[readIdx].ay, data_buffer[readIdx].az,
+                    data_buffer[readIdx].gx, data_buffer[readIdx].gy, data_buffer[readIdx].gz,
+                    data_buffer[readIdx].force);
+      */
+
+      binFile.write((uint8_t*)&data_buffer[readIdx], sizeof(SensorData));
       
-      file.flush();
-      //file.sync();
-      //Serial.println("Wrote samples to file.");
-
-    } else {
-      //Serial.println("Error writing to file.");
+      readIdx = (readIdx + 1) % BUFFER_SIZE;
     }
+        
+    binFile.flush();
+    //binFile.sync();
+    //Serial.println("Wrote samples to file.");
+
   } else {
-    Serial.println("Timestamp:       " + String(seconds) + " s\n");
-
-    Serial.println("FORCE");
-    Serial.println("Raw ADC:         " + String(adcRaw));
-    Serial.println("Compensated ADC: " + String(adcRaw - adcOffset) + "        " + String((adcRaw - adcOffset) / adcMaxValue) + " %");
-    Serial.printf("Force:           %.4f kg   %.2f \%\n\n", kilograms, (kilograms/loadCellMaxWeight)*100);
-
-    Serial.println("ACCELERATION");
-    Serial.printf("X: %.4f\n", imuData[0]);
-    Serial.printf("Y: %.4f\n", imuData[1]);
-    Serial.printf("Z: %.4f\n\n", imuData[2]);
-
-    Serial.println("GYROSCOPE");
-    Serial.printf("X: %.4f\n", imuData[3]);
-    Serial.printf("Y: %.4f\n", imuData[4]);
-    Serial.printf("Z: %.4f\n\n", imuData[5]);
-
-    Serial.println("TEMPERATURE");
-    Serial.printf("F: %.4f\n\n\n", imuData[6]);
-
-    delay(10);
+    //Serial.println("Error writing to file.");
+    return;
   }
+
+}
+
+/*
+  Reads from the binary file and writes to a csv file. Raw values are
+  converted to seconds, m/s², degrees/s, and kg. Denoising is applied.
+*/
+void processData() {
+
+  binFile.close();
+
+  // open binary file
+  
+  if (!binFile.open(binaryFileName, O_READ)) {
+    Serial.println("Failed to open binary file.");
+    return;
+  }
+
+  // create or overwrite the output csv
+  csvFile = sd.open(csvFileName, O_RDWR | O_CREAT | O_TRUNC);
+  if (!csvFile) {
+    Serial.println("Failed to open CSV file.");
+    binFile.close();
+    return;
+  }
+
+  csvFile.println("TIMESTAMP,X ACCEL (m/s^2),Y ACCEL (m/s^2),Z ACCEL (m/s^2),X GYRO (deg/s),Y GYRO (deg/s),Z GYRO (deg/s),FORCE (kg)");
+  
+  SensorData sample;
+
+  while ((unsigned int)binFile.available() >= sizeof(SensorData)) {
+    binFile.read((uint8_t*)&sample, sizeof(SensorData));
+    
+    float seconds = sample.timestamp / 1000000.0;
+
+    float kilograms = (sample.force - adcOffset) * forceCal;
+    if (kilograms < 0) { kilograms = 0; } // clamp
+/*
+    csvFile.printf("%.5f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", 
+                    seconds,
+                    sample.ax * accelCal, sample.ay * accelCal, sample.az * accelCal,  // mps2 (m/s²)
+                    sample.gx * gyroCal, sample.gy * gyroCal, sample.gz * gyroCal,     // rps (rotations per second)
+                    kilograms);
+*/
+    csvFile.printf("%.5f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", 
+                    seconds,
+                    sample.ax, sample.ay, sample.az,  // mps2 (m/s²)
+                    sample.gx, sample.gy, sample.gz,  // rps (rotations per second)
+                    kilograms);
+/*
+    csvOut << seconds << ","
+           << sample.ax << "," << sample.ay << "," << sample.az  // mps2 (m/s²)
+           << sample.gx << "," << sample.gy << "," << sample.gz  // rps (rotations per second)
+           << kilograms << endl;
+*/
+
+  }
+  
+  binFile.close();
+  csvFile.close();
+
+  // denoise
 
 }
 
@@ -183,16 +334,48 @@ void logData() {
   An interrupt service routine to sample the sensors.
 */
 void FASTRUN sampleISR() {
+  
+  data_buffer[writeIdx].timestamp = micros();
+  readIMU(data_buffer[writeIdx]);
+  readADC(data_buffer[writeIdx]);
 
-  readIMU();
-  adcRaw = readADC(0);
+  writeIdx = (writeIdx + 1) % BUFFER_SIZE;
 
+}
+
+
+void handleButtonPress() {
+  int reading = digitalRead(BUTTON_PIN);
+
+  if (reading != lastButtonState) {
+    lastDebounceTime = millis();  // reset debounce timer
+  }
+
+  if ((millis() - lastDebounceTime) > debounceDelay) {
+    // if the button state has changed
+    if (reading != currentButtonState) {
+      currentButtonState = reading;
+
+      // only trigger on button press (LOW state)
+      if (currentButtonState == LOW) {
+        Serial.println("Button pressed — calling processData()");
+        digitalWrite(LED_PIN, HIGH);
+        noInterrupts();
+        processData();
+        //interrupts();
+        delay(500);
+        digitalWrite(LED_PIN, LOW);
+      }
+    }
+  }
+
+  lastButtonState = reading;
 }
 
 
 void setup() {
   
-  //pinMode(buttonPin, INPUT_PULLUP);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
   pinMode(LED_PIN, OUTPUT);
   pinMode(CS_MCP3208, OUTPUT);
   pinMode(CS_IMU, OUTPUT);
@@ -204,8 +387,6 @@ void setup() {
   Serial.begin(9600);
   delay(3000);
 
-  digitalWrite(LED_PIN, LOW);
-
   // setup logging to SD
   if (logging) {
     if (!sd.begin(SdioConfig())) {
@@ -214,26 +395,37 @@ void setup() {
     }
     Serial.println("SD card initialized.");
 
-    // delete the file if it already exists
-    if (sd.exists("recoil_data.csv")) {
-      if (!sd.remove("recoil_data.csv")) {
-        Serial.println("Error deleting the file.");
-        return;
+    if (!volume.init(sd.card())) {
+      Serial.println("Failed to initialize volume!");
+      return;
+    }
+
+    //clusterSizeBytes = volume.bytesPerCluster();
+    Serial.print("Cluster size: ");
+    Serial.print(clusterSizeBytes);
+    Serial.println(" bytes");
+
+    // find next available file name
+    for (int i = 1; i < 1000; i++) {
+      snprintf(binaryFileName, sizeof(binaryFileName), "%s%d.bin", FILE_NAME, i);
+      if (!sd.exists(binaryFileName)) {
+        //fileIndex = i;
+        snprintf(csvFileName, sizeof(csvFileName), "%s%d.csv", FILE_NAME, i);
+        break;
       }
-      Serial.println("File deleted.");
     }
 
     // create and open the file
-    file = sd.open("recoil_data.csv", O_RDWR | O_CREAT | O_AT_END);
-    if (!file) {
-      Serial.println("Error opening file.");
+    if (!binFile.open(binaryFileName, O_WRITE | O_CREAT | O_TRUNC)) {
+      Serial.println("Error opening binary file.");
       return;
     }
-    Serial.println("File opened.");
+    if (!binFile.preAllocate(numClusters)) {
+      Serial.println("Error in binary file pre-allocation.");
+      return;
+    }
+    Serial.println("Binary file opened.");
 
-    file.println("TIMESTAMP,X ACCELERATION (m/s^2),Y ACCELERATION (m/s^2),Z ACCELERATION (m/s^2),X GYROSCOPE (deg/s),Y GYROSCOPE (deg/s),Z GYROSCOPE (deg/s),TEMP (F),F_RAW,F_CORRECTED,FORCE (kg)");
-    file.flush();
-    file.sync();
   }
 
 
@@ -257,14 +449,14 @@ void setup() {
 	adc.analogReadResolution(12);
 
   Serial.println("\nCalibrating...");
-  digitalWrite(LED_PIN, HIGH);
   delay(1000);
   
+  SensorData sample;
   float sum = 0;
   int n = 200;
   for (int i = 0; i < n; i++) {
-      //sum += adc.analogRead(0);
-      sum += readADC(0);
+      readADC(sample);
+      sum += sample.force;
       delay(10);
   }
   adcOffset = sum / n;
@@ -281,13 +473,15 @@ void setup() {
 
 void loop() {
 
-  //handleButtonPress();
+  handleButtonPress();
   
-  //printData();
   if (logging) {
-    logData();
+    noInterrupts();
+    numSamplesAvailable = (writeIdx - readIdx + BUFFER_SIZE) % BUFFER_SIZE;
+    interrupts();
+    if (numSamplesAvailable > 2048) { logData(); }
   } else {
-    logData();
+    printData();
     delay(10);
   }
 
