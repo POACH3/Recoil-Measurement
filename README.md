@@ -31,12 +31,7 @@ A sled for the electronics was designed and 3D printed. It slides into a modifie
 ## Current Functionality
 Force is measured (load cell), amplified (INA125P), and converted to discrete values (MCP3208). These values along with IMU data (LSM6DS3) are fed to the Teensy 4.1 microcontroller. Communication between the Teensy and the peripherals is done via SPI. The power source used is a single CR123A battery with the voltage stepped up (MT3608) to 5.2V.
 
-The current sample rate is 1000Hz. All data collected is logged to a .csv file on an SD card.
-
-## Shortcomings
-- system voltage is not dynamically measured, which could lead to inaccuracies in reported measurements over time due to battery drain or voltage change from environmental effects on the battery
-- calibration with a known weight is not performed each time the unit is powered on, which could lead to inaccuracies in reported force measurements with changing environments
-- clipped acceleration values are probable with large caliber rifles (high g accelerometer could be added to the system to supplement the LSM6DS3)
+The current sample rate is 9000Hz. All data collected is logged to a .bin file on an SD card. Upon button press, the .bin file is converted to a .csv file.
 
 ## Future Functionality
 - increased sample rate
@@ -44,3 +39,8 @@ The current sample rate is 1000Hz. All data collected is logged to a .csv file o
 - muzzle flip angle measurement (orientation)
 - recoil distance measurement (velocity and position)
 - denoising (low pass filter, Kalman filter, or moving average)
+
+## Shortcomings
+- system voltage is not dynamically measured, which could lead to inaccuracies in reported measurements over time due to battery drain or voltage change from environmental effects on the battery
+- calibration with a known weight is not performed each time the unit is powered on, which could lead to inaccuracies in reported force measurements with changing environments
+- clipped acceleration values are probable with large caliber rifles (a high g accelerometer could be added to the system to supplement the LSM6DS3)
