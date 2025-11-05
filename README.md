@@ -10,6 +10,16 @@ This test stand delivers metrics to quantitatively assess rifle recoil and muzzl
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 <!--![Tests](https://img.shields.io/badge/tests-%20none-lightgrey)-->
 
+<p align="center">
+  <img src="media/prototype_img1.png" alt="Electronics Exposed" width="500"/><br/>
+  <em>Electronics Exposed</em>
+</p>
+
+<p align="center">
+  <img src="media/prototype_img2.png" alt="Assembled" width="500"/><br/>
+  <em>Assembled</em>
+</p>
+
 ---
 
 ## Hardware
@@ -27,9 +37,16 @@ This test stand delivers metrics to quantitatively assess rifle recoil and muzzl
 
 Force is measured (load cell), amplified (INA125P), and converted to discrete values (MCP3208). These values along with IMU data (LSM6DS3) are fed to the Teensy 4.1 microcontroller. Communication between the Teensy and the peripherals is done via SPI. The power source used is a single CR123A battery with the voltage stepped up (MT3608) to 5.2V.
 
-Reference the accompanying [circuit diagram](media/circuit_diagram.png) (out of date) and [sketch](media/circuit_sketch2.png).
 
-Additionally, a custom [printed circuit board](hardware/PCB.kicad_pro) (out of date) has been designed in order for size constraints to be met. The PCB has since been modified. The [sketch](media/circuit_sketch2.png) and this [board layout image](media/board_layout.png) reflect the changes made.
+<p align="center">
+  <img src="media/circuit_sketch2.png" alt="Circuit Sketch" width="800"/><br/>
+  <em>Circuit Sketch (current)</em>
+</p>
+
+
+Reference the accompanying [circuit diagram](media/circuit_diagram.png) (out of date) and [sketch](media/circuit_sketch.png) (out of date).
+
+Additionally, a custom [printed circuit board](hardware/PCB.kicad_pro) (out of date) has been designed in order for size constraints to be met (originally the rifle was to be mounted in a test stand, but I wanted to make all the electronics fit onboard the rifle). The PCB has since been modified. The [sketch](media/circuit_sketch2.png) and this [board layout image](media/board_layout.png) reflect the changes made.
 
 A sled for the electronics was designed and 3D printed. It slides into a modified B5 SOPMOD stock.
 
@@ -37,28 +54,19 @@ A sled for the electronics was designed and 3D printed. It slides into a modifie
 
 ## Features and Status
 
-<p align="center">
-  <img src="media/prototype_img1.png" alt="Electronics Exposed" width="500"/><br/>
-  <em>Electronics Exposed</em>
-</p>
-
-<p align="center">
-  <img src="media/prototype_img2.png" alt="Assembled" width="500"/><br/>
-  <em>Assembled</em>
-</p>
-
 ### Current
 - Collects force, acceleration, and gyroscope data
 - Sample rate: 9000 Hz
-- Logging to a .bin file on an SD card (automatic)
+- Logs to a .bin file on an SD card (automatic)
 - Conversion from .bin to .csv (upon button press)
 
 ### Planned
 - Increased sample rate
 - Shot detection
-- Muzzle flip angle measurement (orientation)
-- Recoil distance measurement (velocity and position)
-- Denoising (low pass filter, Kalman filter, or moving average)
+- Process data:
+  - Denoising (low pass filter, Kalman filter, or moving average)
+  - Muzzle flip angle measurement (orientation)
+  - Recoil distance measurement (velocity and position)
 
 ### Known Limitations
 - System voltage is not dynamically measured, which could lead to inaccuracies in reported measurements over time due to battery drain or voltage change from environmental effects on the battery.
