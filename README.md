@@ -11,29 +11,31 @@ This test stand delivers metrics to quantitatively assess rifle recoil and muzzl
 <!--![Tests](https://img.shields.io/badge/tests-%20none-lightgrey)-->
 
 <p align="center">
-  <img src="media/prototype_img1.png" alt="Electronics Exposed" width="500"/><br/>
-  <em>Electronics Exposed</em>
-</p>
-
-<p align="center">
-  <img src="media/prototype_img2.png" alt="Assembled" width="500"/><br/>
-  <em>Assembled</em>
+  <img src="media/recoil_556.png" alt="Recoil Graph" width="800"/><br/>
 </p>
 
 ---
 
 ## Hardware
 
-- Microcontroller: Teensy 4.1
-- IMU: STMicroelectronics LSM6DS3 (on a NOYITO breakout board)
-- Load cell: Phidgets 50kg C2 3160_0 button load cell
-- Amplifier: Texas Instruments INA125P
-- Analog to digital converter: Microchip Technology MCP3208 
-- Power: CR123A battery and housing
-- DC to DC boost converter: MT3608
-- Switch: SPST switch
-- Button: momentary push button
-- LED: T-1 3/4 (standard 5mm)
+<p align="center" style="display: flex; justify-content: center; gap: 20px;">
+  <img src="media/prototype_img1.png" alt="Electronics Exposed" width="300"/>
+  <img src="media/prototype_img2.png" alt="Assembled" width="300"/>
+</p>
+
+| Component Type              | Part / Model                                           |
+|-----------------------------|--------------------------------------------------------|
+| Microcontroller             | Teensy 4.1                                             |
+| IMU                         | STMicroelectronics LSM6DS3 (on a NOYITO breakout board)|
+| Load cell                   | Phidgets 50kg C2 3160_0 button load cell               |
+| Amplifier                   | Texas Instruments INA125P                              |
+| Analog to digital converter | Microchip Technology MCP3208                           |
+| Power                       | CR123A battery and housing                             |
+| DC to DC boost converter    | MT3608                                                 |
+| Switch                      | SPST switch                                            |
+| Button                      | Momentary push button                                  |
+| LED                         | T-1 3/4 (standard 5mm)                                 |
+
 
 Force is measured (load cell), amplified (INA125P), and converted to discrete values (MCP3208). These values along with IMU data (LSM6DS3) are fed to the Teensy 4.1 microcontroller. Communication between the Teensy and the peripherals is done via SPI. The power source used is a single CR123A battery with the voltage stepped up (MT3608) to 5.2V.
 
