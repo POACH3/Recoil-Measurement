@@ -18,11 +18,12 @@ This test stand delivers metrics to quantitatively assess rifle recoil and muzzl
 
 ## Hardware
 
-<p align="center" style="display: flex; justify-content: center; gap: 20px;">
-  <img src="media/prototype_img1.png" alt="Electronics Exposed" width="300"/>
-  <img src="media/prototype_img2.png" alt="Assembled" width="300"/>
+<p align="center" style="display: flex; justify-content: center; gap: 50px;">
+  <img src="media/prototype_img1.png" alt="Electronics Exposed" width="400"/>
+  <img src="media/prototype_img2.png" alt="Assembled" width="400"/>
 </p>
 
+<p align="center">
 | Component Type              | Part / Model                                           |
 |-----------------------------|--------------------------------------------------------|
 | Microcontroller             | Teensy 4.1                                             |
@@ -35,7 +36,7 @@ This test stand delivers metrics to quantitatively assess rifle recoil and muzzl
 | Switch                      | SPST switch                                            |
 | Button                      | Momentary push button                                  |
 | LED                         | T-1 3/4 (standard 5mm)                                 |
-
+</p>
 
 Force is measured (load cell), amplified (INA125P), and converted to discrete values (MCP3208). These values along with IMU data (LSM6DS3) are fed to the Teensy 4.1 microcontroller. Communication between the Teensy and the peripherals is done via SPI. The power source used is a single CR123A battery with the voltage stepped up (MT3608) to 5.2V.
 
@@ -60,17 +61,20 @@ A sled for the electronics was designed and 3D printed. It slides into a modifie
 - Collects force, acceleration, and gyroscope data
 - Sample rate: 9000 Hz
 - Logs to a .bin file on an SD card (automatic)
-- Conversion from .bin to .csv (upon button press)
+- Converts from .bin to .csv (upon button press)
 
 ### Planned
 - Increased sample rate
 - Shot detection
-- Process data:
+- Data processing:
   - Denoising (low pass filter, Kalman filter, or moving average)
   - Muzzle flip angle measurement (orientation)
   - Recoil distance measurement (velocity and position)
+- Upgrade IMU to ICM-40609-D on a Mikroe-6420 breakout board
 
 ### Known Limitations
+- Ripples are observable (about every 250ms) in the force data. The MT3608 is suspected.
+- Output data rate for the IMU is insufficient (6.66kHz for accelerometer, 1.66kHz for gyroscope).
 - System voltage is not dynamically measured, which could lead to inaccuracies in reported measurements over time due to battery drain or voltage change from environmental effects on the battery.
 - Calibration with a known weight is not performed each time the unit is powered on, which could lead to inaccuracies in reported force measurements with changing environments.
 - Clipped acceleration values are probable with large caliber rifles (a high g accelerometer could be added to the system to supplement the LSM6DS3).
