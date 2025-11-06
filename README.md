@@ -23,7 +23,7 @@ This test stand delivers metrics to quantitatively assess rifle recoil and muzzl
   <img src="media/prototype_img2.png" alt="Assembled" width="400"/>
 </p>
 
-<p align="center">
+<div align="center">
 | Component Type              | Part / Model                                           |
 |-----------------------------|--------------------------------------------------------|
 | Microcontroller             | Teensy 4.1                                             |
@@ -36,7 +36,7 @@ This test stand delivers metrics to quantitatively assess rifle recoil and muzzl
 | Switch                      | SPST switch                                            |
 | Button                      | Momentary push button                                  |
 | LED                         | T-1 3/4 (standard 5mm)                                 |
-</p>
+</div>
 
 Force is measured (load cell), amplified (INA125P), and converted to discrete values (MCP3208). These values along with IMU data (LSM6DS3) are fed to the Teensy 4.1 microcontroller. Communication between the Teensy and the peripherals is done via SPI. The power source used is a single CR123A battery with the voltage stepped up (MT3608) to 5.2V.
 
