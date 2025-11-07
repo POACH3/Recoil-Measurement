@@ -7,7 +7,7 @@ This test stand delivers metrics to quantitatively assess rifle recoil and muzzl
 ![Status](https://img.shields.io/badge/status-alpha-yellow)
 ![Arduino](https://img.shields.io/badge/Arduino-00979D?logo=Arduino)
 ![Teensy 4.1](https://img.shields.io/badge/Teensy-4.1-blue)
-[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![License](https://img.shields.io/badge/License-Personal%20Use%20Only-orange.svg)](LICENSE)
 <!--![Tests](https://img.shields.io/badge/tests-%20none-lightgrey)-->
 
 <p align="center">
@@ -85,9 +85,9 @@ A sled for the electronics was designed and 3D printed. It slides into a modifie
 
 ## Project Info
 
+**Status:** Alpha (early development, but manually tested and working reliably with limited functionality)  
 **Author:** T. Stratton  
 **Start Date:** 24-DEC-2024  
-**License:** MIT License – see [LICENSE](./LICENSE)  
+**License:** Non-Commercial, Personal Use Only – see [LICENSE](./LICENSE)  
 **Language:** Arduino  
-**Status:** Alpha (early development, but manually tested and working reliably with limited functionality)  
 **Topics:** rifle, recoil, measurement, kinematics
