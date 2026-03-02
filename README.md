@@ -59,6 +59,8 @@ A sled for the electronics was designed and 3D printed. It slides into a modifie
 
 ## Features and Status
 
+This repo is currently being ported to C.
+
 ### Current
 - Collects force, acceleration, and gyroscope data
 - Sample rate: 9000 Hz
@@ -85,9 +87,9 @@ A sled for the electronics was designed and 3D printed. It slides into a modifie
 
 ## Project Info
 
-**Status:** Alpha (early development, but manually tested and working reliably with limited functionality)  
+**Status:** Beta (early development, but manually tested and working reliably with limited functionality, porting to C)  
 **Author:** T. Stratton  
 **Start Date:** 24-DEC-2024  
 **License:** Non-Commercial, Personal Use Only – see [LICENSE](./LICENSE)  
-**Language:** Arduino  
+**Language:** Arduino -> C  
 **Topics:** rifle, recoil, measurement, kinematics
