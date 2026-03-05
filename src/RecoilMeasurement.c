@@ -23,14 +23,53 @@ NOTES:
     https://github.com/MikroElektronika/mikrosdk_click_v2/tree/master/clicks/6dofimu24
 */
 
-#include <SdFat.h>
+//#include <SdFat.h>
 #include <SPI.h>
-#include "c6dofimu24.h"
-#include <MCP3208.h>
+//#include "c6dofimu24.h"
+//#include <MCP3208.h>
+
+#define CS_PIN 9
+
+uint8_t readRegister(uint8_t reg)
+{
+  digitalWrite(CS_PIN, LOW);
+  SPI.transfer(reg | 0x80);   // read command
+  uint8_t val = SPI.transfer(0x00);
+  digitalWrite(CS_PIN, HIGH);
+  return val;
+}
+
+void writeRegister(uint8_t reg, uint8_t val)
+{
+  digitalWrite(CS_PIN, LOW);
+  SPI.transfer(reg & 0x7F);   // write command
+  SPI.transfer(val);
+  digitalWrite(CS_PIN, HIGH);
+}
+
+void setup()
+{
+  Serial.begin(115200);
+
+  pinMode(CS_PIN, OUTPUT);
+  digitalWrite(CS_PIN, HIGH);
+
+  SPI.begin();
+  SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+
+  delay(100);
+
+  uint8_t whoami = readRegister(0x75);
+
+  Serial.print("WHO_AM_I = 0x");
+  Serial.println(whoami, HEX);
+}
+
+void loop() {}
 
 
 
-
+/*
 int main(void){
 
 
@@ -59,3 +98,4 @@ int main(void){
 
 
     }
+*/
