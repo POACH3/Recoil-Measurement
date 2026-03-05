@@ -23,12 +23,35 @@ NOTES:
     https://github.com/MikroElektronika/mikrosdk_click_v2/tree/master/clicks/6dofimu24
 */
 
-#include c6dofimu24.h
+#include <SdFat.h>
+#include <SPI.h>
+#include "c6dofimu24.h"
+#include <MCP3208.h>
+
+
+
 
 int main(void){
 
+
     // sd card
+
+
     // imu
+    c6dofimu24_t imu;
+    c6dofimu24_cfg_t cfg;
+
+    c6dofimuu24_cfg_setup(&cfg);
+    c6dofimu24_drv_interface_sel(&cfg, C6DOFIMU24_DRV_SEL_SPI);
+
+    //C6DOFIMU24_MAP_MIKROBUS()
+
+    constexpr int CS_IMU = 9;      // D9 IMU sensor chip select
+    
+    constexpr int MOSI_PIN = 11;   // D11 SPI MOSI
+    constexpr int MISO_PIN = 12;   // D12 SPI MISO
+    constexpr int CLOCK_PIN = 13;  // D13 SPI clock
+
     // spi
 
     while(1){
@@ -36,4 +59,3 @@ int main(void){
 
 
     }
-}
